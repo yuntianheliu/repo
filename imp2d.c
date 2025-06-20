@@ -209,9 +209,6 @@ PetscInt readh5(Vec u, PetscInt nx, PetscInt ny) {
     hid_t dataset_id = H5Dopen(file_id, DATASET_NAME, H5P_DEFAULT);
 
     H5Dread(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
-
-    H5Dclose(dataset_id);
-    H5Fclose(file_id);
     
     // Read time step attribute
     // Open the attribute from the dataset, not from the file
@@ -220,6 +217,8 @@ PetscInt readh5(Vec u, PetscInt nx, PetscInt ny) {
     H5Aread(attr_id, H5T_NATIVE_INT, &step);
     H5Aclose(attr_id);
 
+    H5Dclose(dataset_id);
+    H5Fclose(file_id);
 
     PetscScalar *u_array;
     PetscInt Istart, Iend;
@@ -253,6 +252,7 @@ int main(int argc, char **args) {
     PetscOptionsGetInt(NULL, NULL, "-n", &nx, &flg1);
     ny=nx;
     PetscOptionsGetReal(NULL, NULL, "-dt", &dt, &flg2);
+    PetscOptionsGetReal(NULL, NULL, "-T", &T, &flg2);
     
     PetscOptionsGetInt(NULL, NULL, "-restart", &restart_step, &flg3);
     
@@ -324,8 +324,8 @@ int main(int argc, char **args) {
     PetscReal t;
 
     if (restart_step >= 0) {
-        if (rank == 0) PetscPrintf(comm, "Restarting from HDF5 file: %s\n", FILE_NAME);
         step = readh5(u, nx, ny);
+        if (rank == 0) PetscPrintf(comm, "Restarting from HDF5 file: %s, step: \n", FILE_NAME,step);
         t = step * dt;
     } else {
         step = 1;
