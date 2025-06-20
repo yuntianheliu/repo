@@ -1,5 +1,11 @@
 #include <petscksp.h>
 #include <math.h>
+#include <hdf5.h>
+#include <petscsys.h>
+#include <petscviewerhdf5.h>
+
+#define FILE_NAME "diffusion2d.h5"
+#define DATASET_NAME "solution"
 
 // Exact solution and source
 PetscScalar u_exact(PetscReal x, PetscReal y, PetscReal t) {
@@ -105,7 +111,6 @@ void ComputeL2Error(Vec u, PetscInt nx, PetscInt ny, PetscReal time, MPI_Comm co
         PetscReal u_exact_val = exp(-time) * sin(PETSC_PI * x) * sin(PETSC_PI * y);
         PetscReal diff = PetscRealPart(u_array[Ii - Istart]) - u_exact_val;
         local_sum += diff * diff;
-        // PetscPrintf(comm, " %.3f\n", diff); // Optional: comment out to reduce output
     }
 
     VecRestoreArray(u, &u_array);
@@ -120,16 +125,140 @@ void ComputeL2Error(Vec u, PetscInt nx, PetscInt ny, PetscReal time, MPI_Comm co
     PetscPrintf(comm, "Rank %d | t = %.3f | L2 error = %.6e\n", rank, time, L2);
 }
 
+void writeh5(Vec u, PetscInt nx, PetscInt ny, PetscInt step) {
+    MPI_Comm comm = PETSC_COMM_WORLD;
+    int rank, size;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &size);
+
+    PetscScalar *local_data;
+    PetscInt Istart, Iend, n_local;
+    VecGetOwnershipRange(u, &Istart, &Iend);
+    VecGetLocalSize(u, &n_local);
+    VecGetArray(u, &local_data);
+
+    PetscScalar *global_data = NULL;
+    PetscInt *recvcounts = NULL, *displs = NULL;
+
+    if (rank == 0) {
+        global_data = (PetscScalar *)malloc(nx * ny * sizeof(PetscScalar));
+        recvcounts = (PetscInt *)malloc(size * sizeof(PetscInt));
+        displs = (PetscInt *)malloc(size * sizeof(PetscInt));
+    }
+
+    // Gather sizes
+    PetscInt mycount = n_local;
+    MPI_Gather(&mycount, 1, MPI_INT, recvcounts, 1, MPI_INT, 0, comm);
+
+    // Gather displacements
+    if (rank == 0) {
+        displs[0] = 0;
+        for (int i = 1; i < size; ++i)
+            displs[i] = displs[i - 1] + recvcounts[i - 1];
+    }
+
+    // Gather full vector on rank 0
+    MPI_Gatherv(local_data, n_local, MPIU_SCALAR,
+                global_data, recvcounts, displs, MPIU_SCALAR, 0, comm);
+
+    VecRestoreArray(u, &local_data);
+
+    if (rank == 0) {
+        // Write to HDF5
+        hid_t file_id, dataset_id, dataspace_id;
+        hsize_t dims[2] = {nx, ny};
+
+        file_id = H5Fcreate(FILE_NAME, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+        dataspace_id = H5Screate_simple(2, dims, NULL);
+        dataset_id = H5Dcreate(file_id, DATASET_NAME, H5T_NATIVE_DOUBLE,
+                               dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+        // NOTE: global_data is in row-major layout, i.e., index = j*nx + i
+        // But Vec index = j*nx + i, so it's compatible
+        H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
+                 H5P_DEFAULT, global_data);
+                 
+        // Save the current time step as attribute
+        // Create and write attribute on the dataset, not the file
+        hid_t attr_space = H5Screate(H5S_SCALAR);
+        hid_t attr_id = H5Acreate(dataset_id, "step", H5T_NATIVE_INT, attr_space,
+                                  H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attr_id, H5T_NATIVE_INT, &step);
+        H5Aclose(attr_id);
+        H5Sclose(attr_space);
+
+
+        H5Dclose(dataset_id);
+        H5Sclose(dataspace_id);
+        H5Fclose(file_id);
+
+        printf("PETSc Vec u written to %s\n", FILE_NAME);
+
+        free(global_data);
+        free(recvcounts);
+        free(displs);
+    }
+}
+
+
+PetscInt readh5(Vec u, PetscInt nx, PetscInt ny) {
+    PetscInt N = nx * ny;
+    double *data = (double *)malloc(N * sizeof(double));
+
+    hid_t file_id = H5Fopen(FILE_NAME, H5F_ACC_RDONLY, H5P_DEFAULT);
+    hid_t dataset_id = H5Dopen(file_id, DATASET_NAME, H5P_DEFAULT);
+
+    H5Dread(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
+
+    H5Dclose(dataset_id);
+    H5Fclose(file_id);
+    
+    // Read time step attribute
+    // Open the attribute from the dataset, not from the file
+    hid_t attr_id = H5Aopen(dataset_id, "step", H5P_DEFAULT);
+    int step = 1;
+    H5Aread(attr_id, H5T_NATIVE_INT, &step);
+    H5Aclose(attr_id);
+
+
+    PetscScalar *u_array;
+    PetscInt Istart, Iend;
+    VecGetOwnershipRange(u, &Istart, &Iend);
+    VecGetArray(u, &u_array);
+
+    for (PetscInt Ii = Istart; Ii < Iend; ++Ii) {
+        u_array[Ii - Istart] = data[Ii];
+    }
+
+    VecRestoreArray(u, &u_array);
+    free(data);
+    
+    return step;
+}
+
+
 
 int main(int argc, char **args) {
     PetscInitialize(&argc, &args, NULL, NULL);
 
     PetscInt nx = 10, ny = 10;
-    PetscReal dt = 0.0001, T = 1.0;
+    PetscReal dt = 0.01, T = 1.0;
     PetscReal D = 1.0;  // diffusion coefficient
     PetscReal dx, dy;
+    PetscInt restart_step = -1;
+    
+    
+    PetscBool flg1, flg2, flg3;
+    
+    PetscOptionsGetInt(NULL, NULL, "-n", &nx, &flg1);
+    ny=nx;
+    PetscOptionsGetReal(NULL, NULL, "-dt", &dt, &flg2);
+    
+    PetscOptionsGetInt(NULL, NULL, "-restart", &restart_step, &flg3);
+    
     PetscInt steps = (PetscInt)(T / dt);
     PetscInt outputstep = steps/5;
+    PetscInt restartstep = steps/2;
 
     MPI_Comm comm = PETSC_COMM_WORLD;
     int rank, size;
@@ -140,6 +269,8 @@ int main(int argc, char **args) {
     dx = 1.0 / (nx + 1);
     dy = 1.0 / (ny + 1);
     PetscInt N = nx * ny;
+    
+    //if(
 
     // Create solution vector
     Vec u, b, u_ex;
@@ -188,18 +319,29 @@ int main(int argc, char **args) {
     }
     MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY);
+    
+    PetscInt step;
+    PetscReal t;
 
-    // Initial condition
-    PetscScalar *u_array;
-    VecGetArray(u, &u_array);
-    for (PetscInt Ii = Istart; Ii < Iend; ++Ii) {
-        PetscInt j = Ii / nx;
-        PetscInt i = Ii % nx;
-        PetscReal x = (i + 1) * dx;
-        PetscReal y = (j + 1) * dy;
-        u_array[Ii - Istart] = u_exact(x, y, 0.0);
+    if (restart_step >= 0) {
+        if (rank == 0) PetscPrintf(comm, "Restarting from HDF5 file: %s\n", FILE_NAME);
+        step = readh5(u, nx, ny);
+        t = step * dt;
+    } else {
+        step = 1;
+        t = 0.0;
+        PetscScalar *u_array;
+        VecGetArray(u, &u_array);
+        for (PetscInt Ii = Istart; Ii < Iend; ++Ii) {
+            PetscInt j = Ii / nx;
+            PetscInt i = Ii % nx;
+            PetscReal x = (i + 1) * dx;
+            PetscReal y = (j + 1) * dy;
+            u_array[Ii - Istart] = u_exact(x, y, 0.0);
+        }
+        VecRestoreArray(u, &u_array);
     }
-    VecRestoreArray(u, &u_array);
+
 
     // Solver
     KSP ksp;
@@ -208,10 +350,11 @@ int main(int argc, char **args) {
     KSPSetFromOptions(ksp);
 
     // Time stepping
-    for (PetscInt step = 1; step <= steps; ++step) {
+    for (; step <= steps; ++step) {
         PetscReal t = step * dt;
 
         // Assemble RHS
+        PetscScalar *u_array;
         VecGetArray(u, &u_array);
         PetscScalar *b_array;
         VecGetArray(b, &b_array);
@@ -234,60 +377,15 @@ int main(int argc, char **args) {
             char filename[256];
             snprintf(filename, sizeof(filename), "solution_t%03d.vts", step);
             WriteVTK2D(filename, u, nx, ny, PETSC_COMM_WORLD);
-            
             ComputeL2Error(u, nx, ny, t, PETSC_COMM_WORLD);
-            }
+        }
+        
+        if(step % restartstep == 0) {
+            writeh5(u, nx, ny, step);
+        }
         
     }
-    
-    
 
-/*
-    // Output: gather and write from rank 0
-    PetscScalar *u_local;
-    PetscInt local_size;
-    VecGetLocalSize(u, &local_size);
-    VecGetArray(u, &u_local);
-
-    PetscScalar *u_global = NULL;
-    PetscInt *recvcounts = NULL, *displs = NULL;
-
-    if (rank == 0) {
-        u_global = (PetscScalar *)malloc(N * sizeof(PetscScalar));
-        recvcounts = (PetscInt *)malloc(size * sizeof(PetscInt));
-        displs = (PetscInt *)malloc(size * sizeof(PetscInt));
-    }
-
-    MPI_Gather(&local_size, 1, MPIU_INT, recvcounts, 1, MPIU_INT, 0, comm);
-    if (rank == 0) {
-        displs[0] = 0;
-        for (int i = 1; i < size; ++i)
-            displs[i] = displs[i - 1] + recvcounts[i - 1];
-    }
-
-    MPI_Gatherv(u_local, local_size, MPIU_SCALAR,
-                u_global, recvcounts, displs, MPIU_SCALAR,
-                0, comm);
-    VecRestoreArray(u, &u_local);
-
-    if (rank == 0) {
-        FILE *f = fopen("solution2d.dat", "w");
-        for (PetscInt j = 0; j < ny; ++j) {
-            for (PetscInt i = 0; i < nx; ++i) {
-                PetscInt idx = j * nx + i;
-                PetscReal x = (i + 1) * dx;
-                PetscReal y = (j + 1) * dy;
-                fprintf(f, "%g %g %g\n", x, y, PetscRealPart(u_global[idx]));
-            }
-        }
-        fclose(f);
-        free(u_global);
-        free(recvcounts);
-        free(displs);
-    }
-    
-    */
-    
 
 
     // Clean up
