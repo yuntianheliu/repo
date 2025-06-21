@@ -241,24 +241,29 @@ int main(int argc, char **args) {
     PetscInitialize(&argc, &args, NULL, NULL);
 
     PetscInt nx = 10, ny = 10;
-    PetscReal dt = 0.01, T = 1.0;
+    PetscReal t0 = 0.0, T = 1.0, dt = 0.01;
+	PetscInt output_interval = 10, restart_interval = 50;
+
     PetscReal D = 1.0;  // diffusion coefficient
     PetscReal dx, dy;
     PetscInt restart_step = -1;
     
     
-    PetscBool flg1, flg2, flg3;
+	PetscBool flg;
+	PetscOptionsGetInt(NULL, NULL, "-n", &nx, NULL);
+	ny = nx;
+	PetscOptionsGetReal(NULL, NULL, "-dt", &dt, NULL);
+	PetscOptionsGetReal(NULL, NULL, "-T", &T, NULL);
+	PetscOptionsGetReal(NULL, NULL, "-t0", &t0, &flg);
+	PetscOptionsGetInt(NULL, NULL, "-output_interval", &output_interval, NULL);
+	PetscOptionsGetInt(NULL, NULL, "-restart_interval", &restart_interval, NULL);
+	PetscOptionsGetInt(NULL, NULL, "-restart", &restart_step, &flg);
+
     
-    PetscOptionsGetInt(NULL, NULL, "-n", &nx, &flg1);
-    ny=nx;
-    PetscOptionsGetReal(NULL, NULL, "-dt", &dt, &flg2);
-    PetscOptionsGetReal(NULL, NULL, "-T", &T, &flg2);
-    
-    PetscOptionsGetInt(NULL, NULL, "-restart", &restart_step, &flg3);
-    
-    PetscInt steps = (PetscInt)(T / dt);
-    PetscInt outputstep = steps/5;
-    PetscInt restartstep = steps/2;
+	PetscInt steps = (PetscInt)((T - t0) / dt);
+	PetscInt step = (PetscInt)(t0 / dt);
+	PetscReal t = step * dt;
+
 
     MPI_Comm comm = PETSC_COMM_WORLD;
     int rank, size;
@@ -323,13 +328,16 @@ int main(int argc, char **args) {
     PetscInt step;
     PetscReal t;
 
-    if (restart_step >= 0) {
-        step = readh5(u, nx, ny);
-        if (rank == 0) PetscPrintf(comm, "Restarting from HDF5 file: %s, step: \n", FILE_NAME,step);
-        t = step * dt;
-    } else {
-        step = 1;
-        t = 0.0;
+	if (restart_step >= 0) {
+		step = readh5(u, nx, ny);
+		t = step * dt;
+		if (rank == 0)
+		    PetscPrintf(comm, "Restarting from HDF5 file: %s, step: %d, time: %.3f\n", FILE_NAME, step, t);
+	} else {
+		step = (PetscInt)(t0 / dt);
+		t = step * dt;
+
+
         PetscScalar *u_array;
         VecGetArray(u, &u_array);
         for (PetscInt Ii = Istart; Ii < Iend; ++Ii) {
@@ -373,14 +381,14 @@ int main(int argc, char **args) {
         // Solve A u^{n+1} = b
         KSPSolve(ksp, b, u);
         
-        if(step % outputstep == 0) {
+        if(step % output_interval == 0) {
             char filename[256];
             snprintf(filename, sizeof(filename), "solution_t%03d.vts", step);
             WriteVTK2D(filename, u, nx, ny, PETSC_COMM_WORLD);
             ComputeL2Error(u, nx, ny, t, PETSC_COMM_WORLD);
         }
         
-        if(step % restartstep == 0) {
+        if(step % restart_interval == 0) {
             writeh5(u, nx, ny, step);
         }
         
