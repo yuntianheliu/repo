@@ -3,12 +3,15 @@ project(demo C)
 
 # Use MPI wrapper compiler
 enable_language(C)
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRE on)
 
 find_package(MPI REQUIRED)
 include_directories(${MPI_INCLUDE_PATH})
 
 # PETSc paths
-set(PETSC_DIR "/home/wangzq/software/petsc")
+#set(PETSC_DIR "/work/mae-liuj/lib/petsc-3.16.6-opt")
+set(PETSC_DIR "/work/mae-wangzq/apps/petsc")
 #set(PETSC_ARCH "arch-linux-c-debug")
 set(PETSC_ARCH ".")
 set(PETSC_INCLUDE_DIRS
@@ -19,7 +22,7 @@ set(PETSC_LIB_DIR ${PETSC_DIR}/${PETSC_ARCH}/lib)
 set(PETSC_LIBRARIES petsc)
 
 # HDF5 paths
-set(HDF5_ROOT "/home/wangzq/software/hdf5")
+set(HDF5_ROOT "/data/mae-wangzq/apps/hdf5")
 set(HDF5_INCLUDE_DIRS ${HDF5_ROOT}/include)
 set(HDF5_LIB_DIR ${HDF5_ROOT}/lib)
 set(HDF5_LIBRARIES hdf5)
