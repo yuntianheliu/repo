@@ -14,3 +14,4 @@ the latest time u field is dumped into diffusion2d.h5 file, if add '-restart 1' 
 to view,
 paraview
 open file 'solution%steps.vts'
+
