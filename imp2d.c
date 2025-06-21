@@ -168,7 +168,10 @@ void writeh5(Vec u, PetscInt nx, PetscInt ny, PetscInt step) {
         hid_t file_id, dataset_id, dataspace_id;
         hsize_t dims[2] = {nx, ny};
 
-        file_id = H5Fcreate(FILE_NAME, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+        char filename[256];
+	snprintf(filename, sizeof(filename), "restart_t%03d.h5", step);
+	file_id = H5Fcreate(filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+
         dataspace_id = H5Screate_simple(2, dims, NULL);
         dataset_id = H5Dcreate(file_id, DATASET_NAME, H5T_NATIVE_DOUBLE,
                                dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
@@ -201,11 +204,12 @@ void writeh5(Vec u, PetscInt nx, PetscInt ny, PetscInt step) {
 }
 
 
-PetscInt readh5(Vec u, PetscInt nx, PetscInt ny) {
+PetscInt readh5(Vec u, PetscInt nx, PetscInt ny, const char *filename){
     PetscInt N = nx * ny;
     double *data = (double *)malloc(N * sizeof(double));
 
-    hid_t file_id = H5Fopen(FILE_NAME, H5F_ACC_RDONLY, H5P_DEFAULT);
+	hid_t file_id = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
+
     hid_t dataset_id = H5Dopen(file_id, DATASET_NAME, H5P_DEFAULT);
 
     H5Dread(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
@@ -325,12 +329,17 @@ int main(int argc, char **args) {
     MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY);
     
-    PetscInt step;
-    PetscReal t;
+
 
 	if (restart_step >= 0) {
-		step = readh5(u, nx, ny);
+		char h5file[256];
+		snprintf(h5file, sizeof(h5file), "restart_t%03d.h5", step);
+		step = readh5(u, nx, ny, h5file);
+
 		t = step * dt;
+		
+		steps = (PetscInt)(T / dt);
+		
 		if (rank == 0)
 		    PetscPrintf(comm, "Restarting from HDF5 file: %s, step: %d, time: %.3f\n", FILE_NAME, step, t);
 	} else {
