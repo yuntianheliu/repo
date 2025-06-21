@@ -10,7 +10,6 @@ find_package(MPI REQUIRED)
 include_directories(${MPI_INCLUDE_PATH})
 
 # PETSc paths
-#set(PETSC_DIR "/work/mae-liuj/lib/petsc-3.16.6-opt")
 set(PETSC_DIR "/work/mae-wangzq/software/petsc")
 #set(PETSC_ARCH "arch-linux-c-debug")
 set(PETSC_ARCH ".")
