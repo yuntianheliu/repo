@@ -178,7 +178,7 @@ void writeh5(Vec u, PetscInt nx, PetscInt ny, PetscInt step) {
         H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
                  H5P_DEFAULT, global_data);
                  
-        // Save the current time step as attribute
+        // Save the current time step as attributeqqqqqqqqqqqqqqqq
         // Create and write attribute on the dataset, not the file
         hid_t attr_space = H5Screate(H5S_SCALAR);
         hid_t attr_id = H5Acreate(dataset_id, "step", H5T_NATIVE_INT, attr_space,
