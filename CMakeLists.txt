@@ -8,8 +8,9 @@ find_package(MPI REQUIRED)
 include_directories(${MPI_INCLUDE_PATH})
 
 # PETSc paths
-set(PETSC_DIR "/home/mengli/petsc/petsc-3.16.6")
-set(PETSC_ARCH "arch-linux-c-debug")
+set(PETSC_DIR "/home/wangzq/software/petsc")
+#set(PETSC_ARCH "arch-linux-c-debug")
+set(PETSC_ARCH ".")
 set(PETSC_INCLUDE_DIRS
   ${PETSC_DIR}/include
   ${PETSC_DIR}/${PETSC_ARCH}/include
@@ -18,7 +19,7 @@ set(PETSC_LIB_DIR ${PETSC_DIR}/${PETSC_ARCH}/lib)
 set(PETSC_LIBRARIES petsc)
 
 # HDF5 paths
-set(HDF5_ROOT "/usr/local/hdf5")
+set(HDF5_ROOT "/home/wangzq/software/hdf5")
 set(HDF5_INCLUDE_DIRS ${HDF5_ROOT}/include)
 set(HDF5_LIB_DIR ${HDF5_ROOT}/lib)
 set(HDF5_LIBRARIES hdf5)

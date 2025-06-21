@@ -1,0 +1,20 @@
+#!/bin/bash
+#BSUB -J channel
+#BSUB -q debug
+#BSUB -n 4
+#BSUB -R "span[ptile=4]"
+#BSUB -o stdout.out
+#BSUB -e stderr.err
+
+cd $LS_SUBCWD
+
+echo "processes start at:"
+date
+
+module purge
+module load mpi/intel/2018.3
+
+mpirun -np 4 ./build/imp2d -n 100 -dt 0.0001
+
+echo "processes end at:"
+date
